@@ -16,10 +16,41 @@
 #define ALLOW_UNPACKED_ROW   false
 #define ALLOW_UNPACKED_COL   false
 
+char **record_addr = NULL;
+int record_size = 0;
+int current_pos = 0;
+
 static char *try_isend( const void *buf, int count, MPI_Datatype type, int dest,
 	       int tag, MPI_Comm comm, MPI_Request *request )
 {
 	MPI_Isend( buf, count, type, dest, tag, comm, request );
+
+	if( record_addr == NULL ){
+		record_addr = (char **)malloc( sizeof(char*) * 50 );
+		record_size = 50;
+	}
+
+	for( int i = 0; i < current_pos; i++){
+		if( record_addr[i] == (char*)buf )
+			return NULL;
+	}
+
+	record_addr[current_pos] = (char*)buf;
+	current_pos++;
+
+	int rank;
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+	FILE *fptr = fopen("output", "a+");
+	fprintf(fptr, "ADDING_NEW_ADDRESS %p rank %d\n", (char*)buf, rank );
+	fclose(fptr);
+
+	if( current_pos == record_size ){
+		record_addr = (char**)realloc( record_addr, sizeof(char*) * record_size * 2 );
+		record_size *= 2;
+	}
+
+	return NULL;
 }
 
 static int try_irecv( void *buf, int count, MPI_Datatype type, int source, 
