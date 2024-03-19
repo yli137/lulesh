@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 // If no MPI, then this whole file is stubbed out
 #if USE_MPI
@@ -23,32 +24,37 @@ int current_pos = 0;
 static char *try_isend( const void *buf, int count, MPI_Datatype type, int dest,
 	       int tag, MPI_Comm comm, MPI_Request *request )
 {
+	clock_t start = clock();
+	double milliseconds = (double)start * 1000.0 / CLOCKS_PER_SEC;
+
 	MPI_Isend( buf, count, type, dest, tag, comm, request );
 
-	if( record_addr == NULL ){
-		record_addr = (char **)malloc( sizeof(char*) * 50 );
-		record_size = 50;
-	}
+//	if( record_addr == NULL ){
+//		record_addr = (char **)malloc( sizeof(char*) * 50 );
+//		record_size = 50;
+//	}
 
-	for( int i = 0; i < current_pos; i++){
-		if( record_addr[i] == (char*)buf )
-			return NULL;
-	}
+//	for( int i = 0; i < current_pos; i++){
+//		if( record_addr[i] == (char*)buf )
+//			return NULL;
+//	}
 
-	record_addr[current_pos] = (char*)buf;
-	current_pos++;
+//	record_addr[current_pos] = (char*)buf;
+//	current_pos++;
 
-	int rank;
+	int rank, size;
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Type_size(type, &size);
 
 	FILE *fptr = fopen("output", "a+");
-	fprintf(fptr, "ADDING_NEW_ADDRESS %p rank %d\n", (char*)buf, rank );
+	fprintf(fptr, "ADDING_NEW_ADDRESS %p rank %d size %d time %f\n", 
+			(char*)buf, rank, size * count, milliseconds );
 	fclose(fptr);
 
-	if( current_pos == record_size ){
-		record_addr = (char**)realloc( record_addr, sizeof(char*) * record_size * 2 );
-		record_size *= 2;
-	}
+//	if( current_pos == record_size ){
+//		record_addr = (char**)realloc( record_addr, sizeof(char*) * record_size * 2 );
+//		record_size *= 2;
+//	}
 
 	return NULL;
 }
