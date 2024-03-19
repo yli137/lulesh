@@ -19,13 +19,7 @@
 static char *try_isend( const void *buf, int count, MPI_Datatype type, int dest,
 	       int tag, MPI_Comm comm, MPI_Request *request )
 {
-	int size, rank;
-	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
-	MPI_Type_size( type, &size );
-
-	printf("addr %p size %zu rank %d\n", (char*)buf, size * count, rank);
 	MPI_Isend( buf, count, type, dest, tag, comm, request );
-
 	return NULL;
 }
 
