@@ -84,6 +84,49 @@ int check_and_send( char *input, int size ){
 	
 }
 
+#define PAGE_SIZE 4096
+int check_soft_dirty_bit( char *addr, int size )
+{
+	addr = (char*)((uint64_t)addr / PAGE_SIZE * PAGE_SIZE);
+	static int pagemap_fd    = -1;
+	static int kpageflags_fd = -1;
+	bool dirty = false;
+
+	char filename[1024] = "";
+	sprintf(filename, "/proc/%d/pagemap", getpid());
+	
+	kpageflags_fd = open("/proc/kpageflags", O_RDONLY);
+	pagemap_df = open(filename, O_RDONLY);
+
+	if(pagemap_fd < 0 || kpageflags_fd < 0){
+		perror("open pagemap or open kflags\n");
+		exit(0);
+	}
+
+	uint64_t start_addr = (uint64_t)addr,
+		 end_addr   = (uint64_t)( addr + size );
+
+	size_t j = 0;
+	for( uint64_t i = start_addr; i < end_addr; i+=PAGE_SIZE ){
+		uint64_t data,
+			 index = (i / PAGE_SIZE) * sizeof(data);
+
+		if(pread(pagemap_fd, &data, sizeof(data), index) != sizeof(data)){
+			perror("pread");
+			exit(0);
+		}
+
+		if(!(data & (1ULL << 63)) || !(data & (1ULL << 61))){
+			j++;
+			continue;
+		}
+		
+
+	
+
+	}
+}
+
 static char *try_isend( const void *buf, int count, MPI_Datatype type, int dest,
 	       int tag, MPI_Comm comm, MPI_Request *request )
 {
