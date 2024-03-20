@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <time.h>
 
 // If no MPI, then this whole file is stubbed out
 #if USE_MPI
@@ -17,45 +16,78 @@
 #define ALLOW_UNPACKED_ROW   false
 #define ALLOW_UNPACKED_COL   false
 
-char **record_addr = NULL;
-int record_size = 0;
-int current_pos = 0;
+static int compress_lz4_buffer(const char *input_buffer, int input_size,
+		char *output_buffer, int output_size){
+	return LZ4_compress_default( input_buffer, output_buffer, input_size, output_size );
+}
+
+static int decompress_lz4_buffer_default(const char *input_buffer, int input_size,
+		char *output_buffer, int output_size) {
+	return LZ4_decompress_safe( input_buffer, output_buffer, input_size, output_size );
+}
+
+typedef struct addr_pair {
+	char *isend_addr;
+	char *comp_addr;
+	int isend_size;
+	int comp_size;
+} Pair;
+
+Pair *pair;
+int pair_size = 0;
+
+int find_and_create( char *input, int size )
+{
+	if( pair_size == 0 ){
+		pair = (Pair*)malloc(sizeof(Pair));
+		pair_size = 1;
+
+		pair[0].isend_addr = input;
+		pair[0].comp_addr = (char*)malloc(size+100);
+		pair[0].isend_size = size;
+		pair[0].comp_size = -1;
+		return -1;
+	}
+
+	for( int i = 0; i < pair_size; i++ ){
+		if( input == pair[i].isend_addr )
+			return i;
+	}
+
+	pair_size++;
+	pair = (Pair*)realloc(pair, sizeof(Pair) * pair_size);
+	pair[pair_size - 1].isend_addr = input;
+	pair[pair_size - 1].comp_addr = (char*)malloc(size+100);
+	pair[pair_size - 1].isend_size = size;
+	pair[pair_size - 1].comp_size = -1;
+
+	return -1;
+}
+
+void free_all_pair()
+{
+	for( int i = 0; i < pair_size; i++ )
+		free(pair[i].comp_addr);
+
+	free( pair );
+}
+
+void check_and_compress()
+{
+	for( int i = 0; i < pair_size; i++ ){
+		// check soft dirty bit
+		
+	}
+}
+
+int check_and_send( char *input, int size ){
+	
+}
 
 static char *try_isend( const void *buf, int count, MPI_Datatype type, int dest,
 	       int tag, MPI_Comm comm, MPI_Request *request )
 {
-	clock_t start = clock();
-	double milliseconds = (double)start * 1000.0 / CLOCKS_PER_SEC;
-
 	MPI_Isend( buf, count, type, dest, tag, comm, request );
-
-//	if( record_addr == NULL ){
-//		record_addr = (char **)malloc( sizeof(char*) * 50 );
-//		record_size = 50;
-//	}
-
-//	for( int i = 0; i < current_pos; i++){
-//		if( record_addr[i] == (char*)buf )
-//			return NULL;
-//	}
-
-//	record_addr[current_pos] = (char*)buf;
-//	current_pos++;
-
-	int rank, size;
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-	MPI_Type_size(type, &size);
-
-	FILE *fptr = fopen("output", "a+");
-	fprintf(fptr, "ADDING_NEW_ADDRESS %p rank %d size %d time %f\n", 
-			(char*)buf, rank, size * count, milliseconds );
-	fclose(fptr);
-
-//	if( current_pos == record_size ){
-//		record_addr = (char**)realloc( record_addr, sizeof(char*) * record_size * 2 );
-//		record_size *= 2;
-//	}
-
 	return NULL;
 }
 
