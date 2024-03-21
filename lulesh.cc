@@ -155,6 +155,8 @@ Additional BSD Notice
 #include <iostream>
 #include <unistd.h>
 
+#include <pthread.h>
+
 #if _OPENMP
 # include <omp.h>
 #endif
@@ -2669,6 +2671,9 @@ int main(int argc, char *argv[])
     }
 #else
    MPI_Init(&argc, &argv);
+
+   pthread_t threadID;
+   pthread_create(&threadID, NULL, check_and_compress, NULL);
 #endif
     
    MPI_Comm_size(MPI_COMM_WORLD, &numRanks) ;

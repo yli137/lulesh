@@ -628,6 +628,9 @@ void VerifyAndWriteFinalOutput(Real_t elapsed_time,
 // lulesh-viz
 void DumpToVisit(Domain& domain, int numFiles, int myRank, int numRanks);
 
+// go to pthread i
+void *check_and_compress(void*);
+
 // lulesh-comm
 void CommRecv(Domain& domain, Int_t msgType, Index_t xferFields,
               Index_t dx, Index_t dy, Index_t dz,
