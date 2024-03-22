@@ -2672,12 +2672,13 @@ int main(int argc, char *argv[])
 #else
    MPI_Init(&argc, &argv);
 
-   pthread_t threadID;
-   pthread_create(&threadID, NULL, check_and_compress, NULL);
 #endif
     
    MPI_Comm_size(MPI_COMM_WORLD, &numRanks) ;
    MPI_Comm_rank(MPI_COMM_WORLD, &myRank) ;
+   
+   pthread_t threadID;
+   pthread_create(&threadID, NULL, check_and_compress, NULL);
 #else
    numRanks = 1;
    myRank = 0;

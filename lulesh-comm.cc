@@ -44,11 +44,11 @@ int find_and_create( char *input, int size )
 		pair = (Pair*)malloc(sizeof(Pair));
 		pair_size = 1;
 
-		pair[0].isend_addr = input;
 		pair[0].comp_addr = (char*)malloc(size+100);
+		pair[0].isend_addr = input;
 		pair[0].isend_size = size;
 		pair[0].comp_size = -1;
-		pair[0].ready = 0;
+		pair[0].ready = -1;
 		return -1;
 	}
 
@@ -59,11 +59,11 @@ int find_and_create( char *input, int size )
 
 	pair_size++;
 	pair = (Pair*)realloc(pair, sizeof(Pair) * pair_size);
-	pair[pair_size - 1].isend_addr = input;
 	pair[pair_size - 1].comp_addr = (char*)malloc(size+100);
+	pair[pair_size - 1].isend_addr = input;
 	pair[pair_size - 1].isend_size = size;
 	pair[pair_size - 1].comp_size = -1;
-	pair[pair_size - 1].ready = 0;
+	pair[pair_size - 1].ready = -1;
 
 	return -1;
 }
@@ -84,22 +84,25 @@ void clear_soft_dirty_bit()
 
 	static bool is_open = false;
 	static int fd = -1;
-	if(!is_open) {
+	//if(!is_open) {
 		char filename[1024] = "";
 		sprintf(filename, "/proc/%d/clear_refs", getpid());
 
 		fd = open(filename, O_WRONLY);
 		is_open = true;
-	}
+	//}
 
 	if(fd < 0){
 		perror("open clear_refs\n");
 		return;
 	}
+
 	if(write(fd, "4", 1) != 1){
 		perror("wrtie clear_refs\n");
 		return;
 	}
+
+	close(fd);
 
 	IS_PROTECTED = protection;
 }
@@ -120,7 +123,7 @@ bool check_soft_dirty_bit( char *addr, int size )
 
 	if(pagemap_fd < 0 || kpageflags_fd < 0){
 		perror("open pagemap or open kflags\n");
-		exit(0);
+		return false;
 	}
 
 	uint64_t start_addr = (uint64_t)addr,
@@ -142,23 +145,25 @@ bool check_soft_dirty_bit( char *addr, int size )
 		dirty |= data & (1ULL << 55);
 	}
 
+	close(kpageflags_fd);
+	close(pagemap_fd);
+
 	return dirty;
 }
 
 void *check_and_compress(void *)
 {
 	while(1){
-		for( int i = 0; i < pair_size; i++ ){
-			if( check_soft_dirty_bit( pair[i].isend_addr, pair[i].isend_size ) || pair[i].ready == 0 ){
-				pair[i].comp_size = compress_lz4_buffer( pair[i].isend_addr,
-						pair[i].isend_size,
-						pair[i].comp_addr,
-						pair[i].isend_size + 100 );
-				pair[i].ready = 1;
-				clear_soft_dirty_bit();
-			}
+		for( int i = 0; i < pair_size && pair[i].isend_addr != NULL; i++ ){
+			//if( check_soft_dirty_bit( pair[i].isend_addr, pair[i].isend_size ) || pair[i].ready == 0 ){
+			pair[i].comp_size = compress_lz4_buffer( pair[i].isend_addr,
+					pair[i].isend_size,
+					pair[i].comp_addr,
+					pair[i].isend_size + 100 );
+			pair[i].ready = 1;
+			//}
 		}
-		
+
 		//clear_soft_dirty_bit();
 	}
 }
@@ -181,15 +186,24 @@ static char *try_isend( const void *buf, int count, MPI_Datatype type, int dest,
 	MPI_Type_size( type, &size );
 	size *= count;
 
-	if( (i = check_and_send((char*)buf, size)) != -1 ){
-		MPI_Isend( pair[i].comp_addr, 
-			   pair[i].comp_size,
-			   MPI_BYTE,
-			   dest,
-			   tag,
-		           comm,
-			   request );
-		return NULL;
+	find_and_create((char*)buf, size);
+
+	int rank;
+	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
+
+	if( (i = find_and_create((char*)buf, size)) != -1 && pair[i].ready == 1 ){
+		if( pair[i].comp_size < size ){
+			//printf("rank %d sending compressed buffer count %d\n", rank, pair[i].comp_size);
+			MPI_Isend( pair[i].comp_addr, 
+					pair[i].comp_size,
+					MPI_BYTE,
+					dest,
+					tag,
+					comm,
+					request );
+			pair[i].ready = -1;
+			return NULL;
+		}
 	}
 
 	MPI_Isend( buf, count, type, dest, tag, comm, request );
