@@ -5,8 +5,8 @@ SHELL = /bin/sh
 
 LULESH_EXEC = lulesh2.0
 
-MPI_INC = /opt/local/include/openmpi
-MPI_LIB = /opt/local/lib
+MPI_INC = /home/yli137/build/master/include
+MPI_LIB = /home/yli137/build/master/lib
 
 SERCXX = g++ -DUSE_MPI=0
 MPICXX = mpic++ -DUSE_MPI=1
@@ -25,8 +25,8 @@ OBJECTS2.0 = $(SOURCES2.0:.cc=.o)
 #LDFLAGS = -g -O3 -fopenmp -llz4
 
 #Below are reasonable default flags for a serial build
-CXXFLAGS = -g -O3 -I. -Wall -lpthread
-LDFLAGS = -g -O3 -llz4 -lpthread
+CXXFLAGS = -g -I. -I/apps/spacks/2023-11-15/opt/spack/linux-rocky9-x86_64/gcc-11.3.1/lz4-1.9.4-6twgjmvk4wpygr2nxju2grkwyvmlcqns/include -O3 -Wall
+LDFLAGS = -g -O3 -L/apps/spacks/2023-11-15/opt/spack/linux-rocky9-x86_64/gcc-11.3.1/lz4-1.9.4-6twgjmvk4wpygr2nxju2grkwyvmlcqns/lib -llz4 
 #CXXFLAGS = -g -I. -Wall
 #LDFLAGS = -g -llz4 
 
