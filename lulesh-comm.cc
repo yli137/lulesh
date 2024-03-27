@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include <pthread.h>
 #include <sys/mman.h>
 
 // If no MPI, then this whole file is stubbed out
@@ -38,24 +39,25 @@ static int decompress_lz4_buffer_default(const char *input_buffer, int input_siz
 
 Pair *pair;
 volatile int pair_size = 0;
+pthread_mutex_t *lock, create_lock;
 
 void reset_ready()
 {
-	for( int i = 0; i < pair_size; i++ )
-		pair[i].ready = -1;
+//	for( int i = 0; i < pair_size; i++ )
+//		pair[i].ready = -1;
 }
 
 
 int find_and_create( char *input, int size )
 {
+	for( int i = 0; i < pair_size; i++ ){
+		if( input == pair[i].isend_addr )
+			return i;
+	}
+
 	if( pair_size == 0 ){
-		mlock( pair, sizeof(Pair) );
-		mlock( (void*)(&pair_size), sizeof(int) );
-		
 		pair = (Pair*)malloc(sizeof(Pair));
-	
-		mlock( pair[0].comp_addr, size+100 );
-		mlock( pair[0].isend_addr, size );
+		lock = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t));
 
 		pair[0].comp_addr = (char*)malloc(size+100);
 		pair[0].isend_addr = input;
@@ -65,25 +67,14 @@ int find_and_create( char *input, int size )
 		
 		pair_size = 1;
 		
-		munlock( (void*)(&pair_size), sizeof(int) );
-		munlock( pair, sizeof(Pair) );
-		munlock( pair[0].comp_addr, size+100 );
-		munlock( pair[0].isend_addr, size );
 		return -1;
-	}
-
-	for( int i = 0; i < pair_size; i++ ){
-		if( input == pair[i].isend_addr )
-			return i;
 	}
 
 	mlock( pair, sizeof(Pair) * (pair_size) );
 	mlock( (void*)(&pair_size), sizeof(int) );
 
 	pair = (Pair*)realloc(pair, sizeof(Pair) * (pair_size+1));
-
-	mlock( pair[pair_size].comp_addr, size+100 );
-	mlock( pair[pair_size].isend_addr, size );
+	lock = (pthread_mutex_t*)realloc(lock, sizeof(pthread_mutex_t) * (pair_size+1));
 
 	pair[pair_size].comp_addr = (char*)malloc(size+100);
 	pair[pair_size].isend_addr = input;
@@ -93,10 +84,6 @@ int find_and_create( char *input, int size )
 	
 	pair_size++;
 	
-	munlock( (void*)(&pair_size), sizeof(int) );
-	munlock( pair, sizeof(Pair) * (pair_size) );
-	munlock( pair[pair_size - 1].comp_addr, size+100 );
-	munlock( pair[pair_size - 1].isend_addr, size );
 	return -1;
 }
 
@@ -189,45 +176,33 @@ void *check_and_compress(void *)
 	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
 	while(1){
-		mlock( (void*)(&pair_size), sizeof(int) );
-
+#if 0
 		for( int i = 0; (i < pair_size); i++ ){
 			if( pair[i].isend_size < 10000 )
 				continue;
 
-			if( pair[i].ready == 1 )
+			if( check_soft_dirty_bit( pair[i].isend_addr, pair[i].isend_size ) ){
+				clear_soft_dirty_bit();
+
+				printf("rank %d isend_addr %p isend_size %d comp_addr %p pair_size %d\n",
+						rank, pair[i].isend_addr, pair[i].isend_size,
+						pair[i].comp_addr, pair_size);
+
+				char *compressed_buffer = (char*)malloc(pair[i].isend_size + 100);
+
+				pair[i].comp_size = compress_lz4_buffer( pair[i].isend_addr,
+						pair[i].isend_size,
+						compressed_buffer,
+						pair[i].isend_size + 100 );
+				memcpy(pair[i].comp_addr, compressed_buffer, pair[i].comp_size);
+
+				pair[i].ready = 1;
+
+				free(compressed_buffer);
 				break;
-
-			//if( check_soft_dirty_bit( pair[i].isend_addr, pair[i].isend_size ) ){
-
-			//printf("rank %d isend_addr %p isend_size %d comp_addr %p pair_size %d\n",
-			//		rank, pair[i].isend_addr, pair[i].isend_size,
-			//		pair[i].comp_addr, pair_size);
-
-			mlock( pair[i].isend_addr, pair[i].isend_size );
-			mlock( pair[i].comp_addr, pair[i].comp_size );
-			mlock( (void*)(&pair[i].ready), sizeof(int) );
-
-			char *compressed_buffer = (char*)malloc(pair[i].isend_size + 100);
-
-			pair[i].comp_size = compress_lz4_buffer( pair[i].isend_addr,
-					pair[i].isend_size,
-					compressed_buffer,
-					pair[i].isend_size + 100 );
-			memcpy(pair[i].comp_addr, compressed_buffer, pair[i].comp_size);
-		
-			pair[i].ready = 1;
-
-			munlock( pair[i].comp_addr, pair[i].comp_size );
-			munlock( (void*)(&pair[i].ready), sizeof(int) );
-			munlock( pair[i].isend_addr, pair[i].isend_size );
-
-			free(compressed_buffer);
-			break;
-			//}
+			}
 		}
-		
-		munlock( (void*)(&pair_size), sizeof(int) );
+#endif 
 	}
 }
 
@@ -252,7 +227,7 @@ static char *try_isend( const void *buf, int count, MPI_Datatype type, int dest,
 	int rank;
 	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
-	i = find_and_create((char*)buf, size);
+//	i = find_and_create((char*)buf, size);
 
 #if 0
 	if(i != -1 && pair[i].ready == 1 ){
@@ -291,6 +266,7 @@ static int try_irecv( void *buf, int count, MPI_Datatype type, int source,
 
 static int try_decompress( MPI_Request *request, MPI_Status *status, char *srcAddr )
 {
+#if 0
 	int recv_count = 0;
 	MPI_Get_count( status, MPI_BYTE, &recv_count );
 
@@ -307,6 +283,7 @@ static int try_decompress( MPI_Request *request, MPI_Status *status, char *srcAd
 	free( decompress_buffer );
 
 	return 1;
+#endif 
 }
 /*
    There are coherence issues for packing and unpacking message

@@ -16,8 +16,8 @@ SOURCES2.0 = \
 	lulesh-init.cc
 OBJECTS2.0 = $(SOURCES2.0:.cc=.o)
 
-CXXFLAGS = -g -I. -I/apps/spacks/2023-11-15/opt/spack/linux-rocky9-x86_64/gcc-11.3.1/lz4-1.9.4-6twgjmvk4wpygr2nxju2grkwyvmlcqns/include -O3 -Wall -pthread
-LDFLAGS = -g -O3 -L/apps/spacks/2023-11-15/opt/spack/linux-rocky9-x86_64/gcc-11.3.1/lz4-1.9.4-6twgjmvk4wpygr2nxju2grkwyvmlcqns/lib -llz4 -pthread
+CXXFLAGS = -g -I. -O3 -Wall -pthread
+LDFLAGS = -g -O3 -llz4 -pthread
 
 #.cc.o: lulesh.h
 #	$(CXX) -c $(CXXFLAGS) -o $@  $<
