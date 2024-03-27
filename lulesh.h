@@ -21,6 +21,17 @@
 #include <stdint.h>
 #include <vector>
 
+
+typedef struct addr_pair {
+	char *isend_addr;
+	char *comp_addr;
+	int isend_size;
+	int comp_size;
+	int ready;
+} Pair;
+
+
+
 //**************************************************
 // Allow flexibility for arithmetic representations 
 //**************************************************
@@ -627,6 +638,9 @@ void VerifyAndWriteFinalOutput(Real_t elapsed_time,
 
 // lulesh-viz
 void DumpToVisit(Domain& domain, int numFiles, int myRank, int numRanks);
+
+// clean ready
+void reset_ready();
 
 // go to pthread i
 void *check_and_compress(void*);

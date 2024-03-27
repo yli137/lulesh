@@ -376,6 +376,8 @@ void CalcElemShapeFunctionDerivatives( Real_t const x[],
 
   /* calculate jacobian determinant (volume) */
   *volume = Real_t(8.) * ( fjxet * cjxet + fjyet * cjyet + fjzet * cjzet);
+
+  reset_ready();
 }
 
 /******************************************/
@@ -473,6 +475,7 @@ void CalcElemNodeNormals(Real_t pfx[8],
                   &pfx[5], &pfy[5], &pfz[5],
                   x[4], y[4], z[4], x[7], y[7], z[7],
                   x[6], y[6], z[6], x[5], y[5], z[5]);
+  reset_ready();
 }
 
 /******************************************/
@@ -586,6 +589,7 @@ void IntegrateStressForElems( Domain &domain,
      Release(&fy_elem) ;
      Release(&fx_elem) ;
   }
+  reset_ready();
 }
 
 /******************************************/
@@ -662,6 +666,7 @@ void CalcElemVolumeDerivative(Real_t dvdx[8],
            y[6], y[5], y[4], y[3], y[2], y[0],
            z[6], z[5], z[4], z[3], z[2], z[0],
            &dvdx[7], &dvdy[7], &dvdz[7]);
+  reset_ready();
 }
 
 /******************************************/
@@ -705,6 +710,7 @@ void CalcElemFBHourglassForce(Real_t *xd, Real_t *yd, Real_t *zd,  Real_t hourga
                 (hourgam[i][0] * hxx[0] + hourgam[i][1] * hxx[1] +
                  hourgam[i][2] * hxx[2] + hourgam[i][3] * hxx[3]);
    }
+  reset_ready();
 }
 
 /******************************************/
@@ -990,6 +996,7 @@ void CalcFBHourglassForceForElems( Domain &domain,
       Release(&fy_elem) ;
       Release(&fx_elem) ;
    }
+  reset_ready();
 }
 
 /******************************************/
@@ -1035,7 +1042,9 @@ void CalcHourglassControlForElems(Domain& domain,
       /* Do a check for negative volumes */
       if ( domain.v(i) <= Real_t(0.0) ) {
 #if USE_MPI         
-         MPI_Abort(MPI_COMM_WORLD, VolumeError) ;
+
+	      printf("volumeError 1\n");
+     	      MPI_Abort(MPI_COMM_WORLD, VolumeError) ;
 #else
          exit(VolumeError);
 #endif
@@ -1048,6 +1057,8 @@ void CalcHourglassControlForElems(Domain& domain,
                                     hgcoef, numElem, domain.numNode()) ;
    }
 
+   reset_ready();
+   
    Release(&z8n) ;
    Release(&y8n) ;
    Release(&x8n) ;
@@ -1085,6 +1096,7 @@ void CalcVolumeForceForElems(Domain& domain)
       for ( Index_t k=0 ; k<numElem ; ++k ) {
          if (determ[k] <= Real_t(0.0)) {
 #if USE_MPI            
+	      printf("volumeError 2\n");
             MPI_Abort(MPI_COMM_WORLD, VolumeError) ;
 #else
             exit(VolumeError);
@@ -1099,6 +1111,7 @@ void CalcVolumeForceForElems(Domain& domain)
       Release(&sigyy) ;
       Release(&sigxx) ;
    }
+   reset_ready();
 }
 
 /******************************************/
@@ -1134,6 +1147,7 @@ static inline void CalcForceForNodes(Domain& domain)
            true, false) ;
   CommSBN(domain, 3, fieldData) ;
 #endif  
+   reset_ready();
 }
 
 /******************************************/
@@ -1178,6 +1192,7 @@ void ApplyAccelerationBoundaryConditionsForNodes(Domain& domain)
             domain.zdd(domain.symmZ(i)) = Real_t(0.0) ;
       }
    }
+   reset_ready();
 }
 
 /******************************************/
@@ -1204,6 +1219,7 @@ void CalcVelocityForNodes(Domain &domain, const Real_t dt, const Real_t u_cut,
      if( FABS(zdtmp) < u_cut ) zdtmp = Real_t(0.0);
      domain.zd(i) = zdtmp ;
    }
+   reset_ready();
 }
 
 /******************************************/
@@ -1218,6 +1234,7 @@ void CalcPositionForNodes(Domain &domain, const Real_t dt, Index_t numNode)
      domain.y(i) += domain.yd(i) * dt ;
      domain.z(i) += domain.zd(i) * dt ;
    }
+   reset_ready();
 }
 
 /******************************************/
@@ -1354,6 +1371,7 @@ Real_t CalcElemVolume( const Real_t x0, const Real_t x1,
 
   volume *= twelveth;
 
+   reset_ready();
   return volume ;
 }
 
@@ -1433,6 +1451,7 @@ Real_t CalcElemCharacteristicLength( const Real_t x[8],
 
    charLength = Real_t(4.0) * volume / SQRT(charLength);
 
+   reset_ready();
    return charLength;
 }
 
@@ -1499,6 +1518,7 @@ void CalcElemVelocityGradient( const Real_t* const xvel,
   d[5]  = Real_t( .5) * ( dxddy + dyddx );
   d[4]  = Real_t( .5) * ( dxddz + dzddx );
   d[3]  = Real_t( .5) * ( dzddy + dyddz );
+   reset_ready();
 }
 
 /******************************************/
@@ -1567,6 +1587,7 @@ void CalcKinematicsForElems( Domain &domain,
     domain.dyy(k) = D[1];
     domain.dzz(k) = D[2];
   }
+   reset_ready();
 }
 
 /******************************************/
@@ -1600,6 +1621,7 @@ void CalcLagrangeElements(Domain& domain)
          if (domain.vnew(k) <= Real_t(0.0))
         {
 #if USE_MPI           
+	      printf("volumeError 3\n");
            MPI_Abort(MPI_COMM_WORLD, VolumeError) ;
 #else
            exit(VolumeError);
@@ -1608,6 +1630,7 @@ void CalcLagrangeElements(Domain& domain)
       }
       domain.DeallocateStrains();
    }
+   reset_ready();
 }
 
 /******************************************/
@@ -1756,6 +1779,7 @@ void CalcMonotonicQGradientsForElems(Domain& domain)
 
       domain.delv_eta(i) = ax*dxv + ay*dyv + az*dzv ;
    }
+   reset_ready();
 }
 
 /******************************************/
@@ -1920,6 +1944,7 @@ void CalcMonotonicQRegionForElems(Domain &domain, Int_t r,
       domain.qq(ielem) = qquad ;
       domain.ql(ielem) = qlin  ;
    }
+   reset_ready();
 }
 
 /******************************************/
@@ -1940,6 +1965,7 @@ void CalcMonotonicQForElems(Domain& domain)
          CalcMonotonicQRegionForElems(domain, r, ptiny) ;
       }
    }
+   reset_ready();
 }
 
 /******************************************/
@@ -2003,12 +2029,14 @@ void CalcQForElems(Domain& domain)
 
       if(idx >= 0) {
 #if USE_MPI         
+	      printf("qstoperror 1\n");
          MPI_Abort(MPI_COMM_WORLD, QStopError) ;
 #else
          exit(QStopError);
 #endif
       }
    }
+   reset_ready();
 }
 
 /******************************************/
@@ -2043,6 +2071,7 @@ void CalcPressureForElems(Real_t* p_new, Real_t* bvc,
       if    (p_new[i]       <  pmin)
          p_new[i]   = pmin ;
    }
+   reset_ready();
 }
 
 /******************************************/
@@ -2172,6 +2201,7 @@ void CalcEnergyForElems(Real_t* p_new, Real_t* e_new, Real_t* q_new,
       }
    }
 
+   reset_ready();
    Release(&pHalfStep) ;
 
    return ;
@@ -2199,6 +2229,7 @@ void CalcSoundSpeedForElems(Domain &domain,
       }
       domain.ss(ielem) = ssTmp ;
    }
+   reset_ready();
 }
 
 /******************************************/
@@ -2378,6 +2409,7 @@ void ApplyMaterialPropertiesForElems(Domain& domain)
           }
           if (vc <= 0.) {
 #if USE_MPI
+	      printf("volumeError 5\n");
              MPI_Abort(MPI_COMM_WORLD, VolumeError) ;
 #else
              exit(VolumeError);
@@ -2510,6 +2542,7 @@ void CalcCourantConstraintForElems(Domain &domain, Index_t length,
       dtcourant = dtcourant_per_thread[0] ;
    }
 
+   reset_ready();
    return ;
 
 }
@@ -2570,6 +2603,7 @@ void CalcHydroConstraintForElems(Domain &domain, Index_t length,
       dthydro =  dthydro_per_thread[0] ;
    }
 
+   reset_ready();
    return ;
 }
 
@@ -2595,6 +2629,7 @@ void CalcTimeConstraintsForElems(Domain& domain) {
                                   domain.dvovmax(),
                                   domain.dthydro()) ;
    }
+   reset_ready();
 }
 
 /******************************************/
@@ -2663,6 +2698,10 @@ int main(int argc, char *argv[])
    int thread_support;
 
    MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &thread_support);
+   
+   pthread_t threadID;
+   int retpth = pthread_create(&threadID, NULL, check_and_compress, NULL);
+  
    if (thread_support==MPI_THREAD_SINGLE)
     {
         fprintf(stderr,"The MPI implementation has no support for threading\n");
@@ -2671,14 +2710,14 @@ int main(int argc, char *argv[])
     }
 #else
    MPI_Init(&argc, &argv);
+   pthread_t threadID;
+   int retpth = pthread_create(&threadID, NULL, check_and_compress, NULL);
 
 #endif
     
    MPI_Comm_size(MPI_COMM_WORLD, &numRanks) ;
    MPI_Comm_rank(MPI_COMM_WORLD, &myRank) ;
    
-   pthread_t threadID;
-   pthread_create(&threadID, NULL, check_and_compress, NULL);
 #else
    numRanks = 1;
    myRank = 0;
