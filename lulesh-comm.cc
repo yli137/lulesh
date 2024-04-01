@@ -4,12 +4,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
-
-#include <pthread.h>
-#include <sys/mman.h>
 
 // If no MPI, then this whole file is stubbed out
+#if USE_MPI
 
 #include <mpi.h>
 
@@ -19,242 +16,55 @@
 #define ALLOW_UNPACKED_ROW   false
 #define ALLOW_UNPACKED_COL   false
 
-static int compress_lz4_buffer(const char *input_buffer, int input_size,
+int compress_lz4_buffer(const char *input_buffer, int input_size,
 		char *output_buffer, int output_size){
 	return LZ4_compress_default( input_buffer, output_buffer, input_size, output_size );
 }
 
-static int decompress_lz4_buffer_default(const char *input_buffer, int input_size,
-		char *output_buffer, int output_size) {
+int decompress_lz4_buffer_default(const char *input_buffer, int input_size,
+                char *output_buffer, int output_size) {
 	return LZ4_decompress_safe( input_buffer, output_buffer, input_size, output_size );
-}
-
-//typedef struct addr_pair {
-//	char *isend_addr;
-//	char *comp_addr;
-//	int isend_size;
-//	int comp_size;
-//	int ready;
-//} Pair;
-
-Pair *pair;
-volatile int pair_size = 0;
-pthread_mutex_t *lock, create_lock;
-
-void reset_ready()
-{
-//	for( int i = 0; i < pair_size; i++ )
-//		pair[i].ready = -1;
-}
-
-
-int find_and_create( char *input, int size )
-{
-	for( int i = 0; i < pair_size; i++ ){
-		if( input == pair[i].isend_addr )
-			return i;
-	}
-
-	if( pair_size == 0 ){
-		pair = (Pair*)malloc(sizeof(Pair));
-		lock = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t));
-
-		pair[0].comp_addr = (char*)malloc(size+100);
-		pair[0].isend_addr = input;
-		pair[0].isend_size = size;
-		pair[0].comp_size = -1;
-		pair[0].ready = -1;
-		
-		pair_size = 1;
-		
-		return -1;
-	}
-
-	mlock( pair, sizeof(Pair) * (pair_size) );
-	mlock( (void*)(&pair_size), sizeof(int) );
-
-	pair = (Pair*)realloc(pair, sizeof(Pair) * (pair_size+1));
-	lock = (pthread_mutex_t*)realloc(lock, sizeof(pthread_mutex_t) * (pair_size+1));
-
-	pair[pair_size].comp_addr = (char*)malloc(size+100);
-	pair[pair_size].isend_addr = input;
-	pair[pair_size].isend_size = size;
-	pair[pair_size].comp_size = -1;
-	pair[pair_size].ready = -1;
-	
-	pair_size++;
-	
-	return -1;
-}
-
-void free_all_pair()
-{
-	for( int i = 0; i < pair_size; i++ )
-		free(pair[i].comp_addr);
-
-	free( pair );
-}
-
-static bool IS_PROTECTED = false;
-void clear_soft_dirty_bit()
-{
-	bool protection = IS_PROTECTED;
-	IS_PROTECTED = true;
-
-	static bool is_open = false;
-	static int fd = -1;
-	//if(!is_open) {
-		char filename[1024] = "";
-		sprintf(filename, "/proc/%d/clear_refs", getpid());
-
-		fd = open(filename, O_WRONLY);
-		is_open = true;
-	//}
-
-	if(fd < 0){
-		perror("open clear_refs\n");
-		return;
-	}
-
-	if(write(fd, "4", 1) != 1){
-		perror("wrtie clear_refs\n");
-		return;
-	}
-
-	close(fd);
-
-	IS_PROTECTED = protection;
-}
-
-#define PAGE_SIZE 4096
-bool check_soft_dirty_bit( char *addr, int size )
-{
-	addr = (char*)((uint64_t)addr / PAGE_SIZE * PAGE_SIZE);
-	static int pagemap_fd    = -1;
-	static int kpageflags_fd = -1;
-	bool dirty = false;
-
-	char filename[1024] = "";
-	sprintf(filename, "/proc/%d/pagemap", getpid());
-	
-	kpageflags_fd = open("/proc/kpageflags", O_RDONLY);
-	pagemap_fd = open(filename, O_RDONLY);
-
-	if(pagemap_fd < 0 || kpageflags_fd < 0){
-		perror("open pagemap or open kflags\n");
-		return false;
-	}
-
-	uint64_t start_addr = (uint64_t)addr,
-		 end_addr   = (uint64_t)( (char*)addr + size );
-
-	for( uint64_t i = start_addr; i < end_addr; i+=PAGE_SIZE ){
-		uint64_t data,
-			 index = (i / PAGE_SIZE) * sizeof(data);
-
-		if(pread(pagemap_fd, &data, sizeof(data), index) != sizeof(data)){
-			perror("pread");
-			exit(0);
-		}
-
-		if(!(data & (1ULL << 63)) || (data & (1ULL << 61))){
-			continue;
-		}
-		
-		dirty |= data & (1ULL << 55);
-	}
-
-	close(kpageflags_fd);
-	close(pagemap_fd);
-
-	return dirty;
-}
-
-void *check_and_compress(void *)
-{
-	int rank;
-	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
-
-	while(1){
-#if 0
-		for( int i = 0; (i < pair_size); i++ ){
-			if( pair[i].isend_size < 10000 )
-				continue;
-
-			if( check_soft_dirty_bit( pair[i].isend_addr, pair[i].isend_size ) ){
-				clear_soft_dirty_bit();
-
-				printf("rank %d isend_addr %p isend_size %d comp_addr %p pair_size %d\n",
-						rank, pair[i].isend_addr, pair[i].isend_size,
-						pair[i].comp_addr, pair_size);
-
-				char *compressed_buffer = (char*)malloc(pair[i].isend_size + 100);
-
-				pair[i].comp_size = compress_lz4_buffer( pair[i].isend_addr,
-						pair[i].isend_size,
-						compressed_buffer,
-						pair[i].isend_size + 100 );
-				memcpy(pair[i].comp_addr, compressed_buffer, pair[i].comp_size);
-
-				pair[i].ready = 1;
-
-				free(compressed_buffer);
-				break;
-			}
-		}
-#endif 
-	}
-}
-
-int check_and_send( char *input, int size )
-{
-	for( int i = 0; i < pair_size; i++ ){
-		if( pair[i].isend_addr == input && !check_soft_dirty_bit(input, size) )
-			return i;
-	}
-
-	return -1;
 }
 
 
 static char *try_isend( const void *buf, int count, MPI_Datatype type, int dest,
 	       int tag, MPI_Comm comm, MPI_Request *request )
 {
-	int size, i;
+	int size, rank;
 	MPI_Type_size( type, &size );
 	size *= count;
 
-	int rank;
 	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
-//	i = find_and_create((char*)buf, size);
-
+	int indexPair = find_and_create((char*)buf, size);
+	if( indexPair != -1 ){
+		if( pair[indexPair].ready == 1 && pair[indexPair].comp_size < size ){
+			//printf("rank %d sending compress buffer\n", rank);
 #if 0
-	if(i != -1 && pair[i].ready == 1 ){
-		if( pair[i].comp_size < size ){
-			mlock( pair[i].comp_addr, pair[i].comp_size );
-			mlock( (void*)(&pair[i].comp_size), sizeof(int) );
+			if( rank == 0 ){
+			char *comp_buf = (char*)malloc(size+100);
+			printf("test compress %p %d\n", buf, size);
+			int comp_size = compress_lz4_buffer( (const char*)buf, size, comp_buf, size+100 );
 
-			MPI_Isend( pair[i].comp_addr, 
-					pair[i].comp_size,
-					MPI_BYTE,
-					dest,
-					tag,
-					comm,
-					request );
-			pair[i].ready = -1;
-			printf("rank %d i %d send %p orig_size %d size %d\n", 
-					rank, i, pair[i].comp_addr, 
-					pair[i].isend_size, pair[i].comp_size);
-
-			munlock( (void*)(&pair[i].comp_size), sizeof(int) );
-			munlock( pair[i].comp_addr, pair[i].comp_size );
-			return NULL;
-		}
-	}
+			for( int i = 0; i < comp_size; i++ ){
+				if(comp_buf[i] != (pair[indexPair].comp_addr)[i])
+					printf("position %d is wrong comp_size %d thread_comp_size %d\n", 
+							i, comp_size, pair[indexPair].comp_size);
+			}
+			}
+			exit(0);
 #endif
 
-	MPI_Isend( buf, count, type, dest, tag, comm, request );
+			MPI_Isend( pair[indexPair].comp_addr, pair[indexPair].comp_size, MPI_BYTE,
+				   dest, tag, comm, request );
+			pair[indexPair].ready = -1;
+			return NULL;
+		}
+
+		pair[indexPair].ready = -1;
+	}
+
+        MPI_Isend( buf, count, type, dest, tag, comm, request );
 	return NULL;
 }
 
@@ -266,7 +76,6 @@ static int try_irecv( void *buf, int count, MPI_Datatype type, int source,
 
 static int try_decompress( MPI_Request *request, MPI_Status *status, char *srcAddr )
 {
-#if 0
 	int recv_count = 0;
 	MPI_Get_count( status, MPI_BYTE, &recv_count );
 
@@ -281,10 +90,9 @@ static int try_decompress( MPI_Request *request, MPI_Status *status, char *srcAd
 		memcpy( srcAddr, decompress_buffer, decomp_size );
 
 	free( decompress_buffer );
-
 	return 1;
-#endif 
 }
+
 /*
    There are coherence issues for packing and unpacking message
    buffers.  Ideally, you would like a lot of threads to 
@@ -631,18 +439,14 @@ void CommSend(Domain& domain, Int_t msgType,
               Index_t xferFields, Domain_member *fieldData,
               Index_t dx, Index_t dy, Index_t dz, bool doSend, bool planeOnly)
 {
-#if 0
-	int rank;
-	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
-
-	if( rank == 4 ){
-		printf("rank %d pid %d\n", rank, getpid());
-		sleep(20);
-	}
-#endif
    if (domain.numRanks() == 1)
       return ;
 
+   int rank;
+   MPI_Comm_rank( MPI_COMM_WORLD, &rank );
+   pthread_mutex_lock( &(send_locks[rank]) );
+
+   //printf("rank %d send locked\n", rank);
    char **addr = (char**)malloc(sizeof(char*) * 500);
    int iaddr = 0;
    /* post recieve buffers for all incoming messages */
@@ -1124,6 +928,9 @@ void CommSend(Domain& domain, Int_t msgType,
    }
 
    MPI_Waitall(26, domain.sendRequest, status);
+   pthread_mutex_unlock( &(send_locks[rank]) );
+  
+   //printf("rank %d unlocked\n", rank);
 
    for( int j = 0; j < iaddr; j++ ){
        if( addr[j] != NULL )
@@ -1201,8 +1008,9 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
-	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
          
+	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
+
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
             Domain_member dest = fieldData[fi] ;
             for (Index_t i=0; i<opCount; ++i) {
@@ -1222,8 +1030,9 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
-	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
          
+	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
+
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
             Domain_member dest = fieldData[fi] ;
             for (Index_t i=0; i<dz; ++i) {
@@ -1239,8 +1048,9 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
-	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
          
+	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
+
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
             Domain_member dest = fieldData[fi] ;
             for (Index_t i=0; i<dz; ++i) {
@@ -1261,8 +1071,9 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
-	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
          
+	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
+
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
             Domain_member dest = fieldData[fi] ;
             for (Index_t i=0; i<dz; ++i) {
@@ -1278,8 +1089,9 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
-	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
          
+	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
+
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
             Domain_member dest = fieldData[fi] ;
             for (Index_t i=0; i<dz; ++i) {
@@ -1297,6 +1109,7 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1313,6 +1126,7 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1329,6 +1143,7 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1345,6 +1160,7 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1361,6 +1177,7 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1377,6 +1194,7 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1393,6 +1211,7 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1409,6 +1228,7 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1425,6 +1245,7 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1441,6 +1262,7 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1457,6 +1279,7 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1473,6 +1296,7 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1491,7 +1315,8 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
                                              emsg * maxEdgeComm +
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(0) += comBuf[fi] ;
@@ -1505,7 +1330,8 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       Index_t idx = dx*dy*(dz - 1) ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(idx) += comBuf[fi] ;
@@ -1519,7 +1345,8 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       Index_t idx = dx - 1 ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(idx) += comBuf[fi] ;
@@ -1533,7 +1360,8 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       Index_t idx = dx*dy*(dz - 1) + (dx - 1) ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(idx) += comBuf[fi] ;
@@ -1547,7 +1375,8 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       Index_t idx = dx*(dy - 1) ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(idx) += comBuf[fi] ;
@@ -1561,7 +1390,8 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       Index_t idx = dx*dy*(dz - 1) + dx*(dy - 1) ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(idx) += comBuf[fi] ;
@@ -1575,7 +1405,8 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       Index_t idx = dx*dy - 1 ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(idx) += comBuf[fi] ;
@@ -1589,7 +1420,8 @@ void CommSBN(Domain& domain, Int_t xferFields, Domain_member *fieldData) {
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       Index_t idx = dx*dy*dz - 1 ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(idx) += comBuf[fi] ;
@@ -1659,6 +1491,7 @@ void CommSyncPosVel(Domain& domain) {
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
+
 	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
 
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1674,6 +1507,7 @@ void CommSyncPosVel(Domain& domain) {
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
+
 	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
 
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1695,6 +1529,7 @@ void CommSyncPosVel(Domain& domain) {
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
+
 	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
 
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1712,6 +1547,7 @@ void CommSyncPosVel(Domain& domain) {
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
+
 	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
 
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1735,6 +1571,7 @@ void CommSyncPosVel(Domain& domain) {
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
+
 	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
 
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1752,6 +1589,7 @@ void CommSyncPosVel(Domain& domain) {
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
+
 	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
 
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1771,6 +1609,7 @@ void CommSyncPosVel(Domain& domain) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1787,6 +1626,7 @@ void CommSyncPosVel(Domain& domain) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1803,6 +1643,7 @@ void CommSyncPosVel(Domain& domain) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1819,6 +1660,7 @@ void CommSyncPosVel(Domain& domain) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1835,6 +1677,7 @@ void CommSyncPosVel(Domain& domain) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1851,6 +1694,7 @@ void CommSyncPosVel(Domain& domain) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1867,6 +1711,7 @@ void CommSyncPosVel(Domain& domain) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1883,6 +1728,7 @@ void CommSyncPosVel(Domain& domain) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1899,6 +1745,7 @@ void CommSyncPosVel(Domain& domain) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1915,6 +1762,7 @@ void CommSyncPosVel(Domain& domain) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1931,6 +1779,7 @@ void CommSyncPosVel(Domain& domain) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1947,6 +1796,7 @@ void CommSyncPosVel(Domain& domain) {
       srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm +
                                        emsg * maxEdgeComm] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg], &status) ;
+
       try_decompress( &domain.recvRequest[pmsg+emsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -1966,7 +1816,8 @@ void CommSyncPosVel(Domain& domain) {
                                              emsg * maxEdgeComm +
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(0) = comBuf[fi] ;
@@ -1980,7 +1831,8 @@ void CommSyncPosVel(Domain& domain) {
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       Index_t idx = dx*dy*(dz - 1) ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(idx) = comBuf[fi] ;
@@ -1994,7 +1846,8 @@ void CommSyncPosVel(Domain& domain) {
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       Index_t idx = dx - 1 ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(idx) = comBuf[fi] ;
@@ -2008,7 +1861,8 @@ void CommSyncPosVel(Domain& domain) {
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       Index_t idx = dx*dy*(dz - 1) + (dx - 1) ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(idx) = comBuf[fi] ;
@@ -2022,7 +1876,8 @@ void CommSyncPosVel(Domain& domain) {
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       Index_t idx = dx*(dy - 1) ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(idx) = comBuf[fi] ;
@@ -2036,7 +1891,8 @@ void CommSyncPosVel(Domain& domain) {
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       Index_t idx = dx*dy*(dz - 1) + dx*(dy - 1) ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(idx) = comBuf[fi] ;
@@ -2050,7 +1906,8 @@ void CommSyncPosVel(Domain& domain) {
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       Index_t idx = dx*dy - 1 ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(idx) = comBuf[fi] ;
@@ -2064,7 +1921,8 @@ void CommSyncPosVel(Domain& domain) {
                                       cmsg * CACHE_COHERENCE_PAD_REAL] ;
       Index_t idx = dx*dy*dz - 1 ;
       MPI_Wait(&domain.recvRequest[pmsg+emsg+cmsg], &status) ;
-      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)comBuf );
+
+      try_decompress( &domain.recvRequest[pmsg+emsg+cmsg], &status, (char*)srcAddr );
 
       for (Index_t fi=0; fi<xferFields; ++fi) {
          (domain.*fieldData[fi])(idx) = comBuf[fi] ;
@@ -2135,6 +1993,7 @@ void CommMonoQ(Domain& domain)
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
+
 	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
 
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -2151,6 +2010,7 @@ void CommMonoQ(Domain& domain)
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
+
 	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
 
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -2173,6 +2033,7 @@ void CommMonoQ(Domain& domain)
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
+
 	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
 
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -2189,6 +2050,7 @@ void CommMonoQ(Domain& domain)
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
+
 	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
 
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -2210,6 +2072,7 @@ void CommMonoQ(Domain& domain)
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
+
 	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
 
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -2226,6 +2089,7 @@ void CommMonoQ(Domain& domain)
          /* contiguous memory */
          srcAddr = &domain.commDataRecv[pmsg * maxPlaneComm] ;
          MPI_Wait(&domain.recvRequest[pmsg], &status) ;
+
 	 try_decompress( &domain.recvRequest[pmsg], &status, (char*)srcAddr );
 
          for (Index_t fi=0 ; fi<xferFields; ++fi) {
@@ -2240,3 +2104,4 @@ void CommMonoQ(Domain& domain)
    }
 }
 
+#endif

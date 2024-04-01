@@ -13,11 +13,12 @@ SOURCES2.0 = \
 	lulesh-comm.cc \
 	lulesh-viz.cc \
 	lulesh-util.cc \
-	lulesh-init.cc
+	lulesh-init.cc \
+	lulesh-compression.cc
 OBJECTS2.0 = $(SOURCES2.0:.cc=.o)
 
-CXXFLAGS = -g -I. -O3 -Wall -pthread
-LDFLAGS = -g -O3 -llz4 -pthread
+CXXFLAGS = -g -I. -O3 -Wall -lpthread
+LDFLAGS = -g -O3 -llz4 -lpthread
 
 #.cc.o: lulesh.h
 #	$(CXX) -c $(CXXFLAGS) -o $@  $<

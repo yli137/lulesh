@@ -20,17 +20,27 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <vector>
+#include <unistd.h>
 
+#include <pthread.h>
 
+#ifndef GLOBAL_VAR
+#define GLOBAL_VAR
 typedef struct addr_pair {
 	char *isend_addr;
-	char *comp_addr;
 	int isend_size;
+	char *comp_addr;
 	int comp_size;
 	int ready;
 } Pair;
 
+extern Pair *pair;
+extern int pair_size;
 
+// locks
+extern pthread_mutex_t creation_lock;
+extern pthread_mutex_t send_locks[8];
+#endif
 
 //**************************************************
 // Allow flexibility for arithmetic representations 
@@ -244,6 +254,10 @@ class Domain {
 
    void DeallocateGradients()
    {
+      int rank;
+      MPI_Comm_rank( MPI_COMM_WORLD, &rank );
+
+      pthread_mutex_lock( &(send_locks[rank]) );
       Release(&m_delx_zeta);
       Release(&m_delx_eta) ;
       Release(&m_delx_xi)  ;
@@ -251,6 +265,7 @@ class Domain {
       Release(&m_delv_zeta);
       Release(&m_delv_eta) ;
       Release(&m_delv_xi)  ;
+      pthread_mutex_unlock( &(send_locks[rank]) );
    }
 
    void AllocateStrains(Int_t numElem)
@@ -262,9 +277,14 @@ class Domain {
 
    void DeallocateStrains()
    {
+      int rank;
+      MPI_Comm_rank( MPI_COMM_WORLD, &rank );
+
+      pthread_mutex_lock( &(send_locks[rank]) );
       Release(&m_dzz) ;
       Release(&m_dyy) ;
       Release(&m_dxx) ;
+      pthread_mutex_unlock( &(send_locks[rank]) );
    }
    
    //
@@ -639,12 +659,6 @@ void VerifyAndWriteFinalOutput(Real_t elapsed_time,
 // lulesh-viz
 void DumpToVisit(Domain& domain, int numFiles, int myRank, int numRanks);
 
-// clean ready
-void reset_ready();
-
-// go to pthread i
-void *check_and_compress(void*);
-
 // lulesh-comm
 void CommRecv(Domain& domain, Int_t msgType, Index_t xferFields,
               Index_t dx, Index_t dy, Index_t dz,
@@ -660,3 +674,17 @@ void CommMonoQ(Domain& domain);
 // lulesh-init
 void InitMeshDecomp(Int_t numRanks, Int_t myRank,
                     Int_t *col, Int_t *row, Int_t *plane, Int_t *side);
+
+
+// thread compression stuff
+int compress_lz4_buffer( const char *input_buffer, int input_size, 
+		         char *output_buffer, int output_size );
+int decompress_lz4_buffer_default( const char *input_buffer, int input_size, 
+		                   char *output_buffer, int output_size);
+void *doing_compression(void *);
+
+#define PAGE_SIZE getpagesize()
+bool check_soft_dirty_bit( char *addr, int size );
+void clear_soft_dirty_bit();
+
+int find_and_create( char *addr, int size );
