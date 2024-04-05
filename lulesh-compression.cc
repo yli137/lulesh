@@ -9,6 +9,8 @@ Pair *pair;
 int pair_size = 0;
 pthread_mutex_t creation_lock;
 
+#define COMPRESS_NUM 1
+
 void signal_handler(int sig){
 }
 
@@ -19,15 +21,12 @@ void *doing_compression(void *)
 	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
 	while(1){
-
-		if( send_locks == NULL )
-			continue;
-
 		//pthread_mutex_lock( &(send_locks[rank]) );
 		pthread_mutex_lock( &creation_lock );
 		pthread_mutex_unlock( &creation_lock );
-		for( int i = pair_size-1; i > 0; i-- ){
-			pthread_mutex_lock( &(send_locks[rank]) );
+		int j = 0;
+		for( int i = pair_size-1; i > 0 && j < COMPRESS_NUM; i--, j++ ){
+			pthread_mutex_lock( &send_lock );
 			pthread_mutex_lock( &creation_lock );
 
 			if( pair[i].isend_addr != NULL && pair[i].isend_size > 1000 ){
@@ -37,12 +36,11 @@ void *doing_compression(void *)
 			}
 
 			pthread_mutex_unlock( &creation_lock );
-			pthread_mutex_unlock( &(send_locks[rank]) );
-			break;
+			pthread_mutex_unlock( &send_lock );
+			//break;
 		}
 		//pthread_mutex_unlock( &creation_lock );
 		//pthread_mutex_unlock( &(send_locks[rank]) );
-
 	}
 }
 

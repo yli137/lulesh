@@ -16,6 +16,8 @@
 #define ALLOW_UNPACKED_ROW   false
 #define ALLOW_UNPACKED_COL   false
 
+pthread_mutex_t send_lock;
+
 int compress_lz4_buffer(const char *input_buffer, int input_size,
 		char *output_buffer, int output_size){
 	return LZ4_compress_default( input_buffer, output_buffer, input_size, output_size );
@@ -36,10 +38,16 @@ static char *try_isend( const void *buf, int count, MPI_Datatype type, int dest,
 
 	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
+	//if( rank == 0 )
+	//	printf("Buffer size %d\n", size);
+
 	int indexPair = find_and_create((char*)buf, size);
 	if( indexPair != -1 ){
 		if( pair[indexPair].ready == 1 && pair[indexPair].comp_size < size ){
-			//printf("rank %d sending compress buffer\n", rank);
+//			printf("rank %d sending compress buffer orig_size %d compress_size %d\n", 
+//					rank,
+//					size, 
+//					pair[indexPair].comp_size);
 #if 0
 			if( rank == 0 ){
 			char *comp_buf = (char*)malloc(size+100);
@@ -444,7 +452,7 @@ void CommSend(Domain& domain, Int_t msgType,
 
    int rank;
    MPI_Comm_rank( MPI_COMM_WORLD, &rank );
-   pthread_mutex_lock( &(send_locks[rank]) );
+   pthread_mutex_lock( &send_lock );
 
    //printf("rank %d send locked\n", rank);
    char **addr = (char**)malloc(sizeof(char*) * 500);
@@ -928,7 +936,7 @@ void CommSend(Domain& domain, Int_t msgType,
    }
 
    MPI_Waitall(26, domain.sendRequest, status);
-   pthread_mutex_unlock( &(send_locks[rank]) );
+   pthread_mutex_unlock( &send_lock );
   
    //printf("rank %d unlocked\n", rank);
 

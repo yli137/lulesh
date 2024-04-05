@@ -167,8 +167,6 @@ Additional BSD Notice
 #include "lulesh.h"
 
 
-pthread_mutex_t send_locks[8];
-
 /* Work Routines */
 
 static inline
@@ -2687,19 +2685,21 @@ int main(int argc, char *argv[])
    MPI_Comm_size(MPI_COMM_WORLD, &numRanks) ;
    MPI_Comm_rank(MPI_COMM_WORLD, &myRank) ;
 
-   printf("rank %d send_lock %p\n", myRank, &(send_locks[0]));
-
    cpu_set_t cpuset;
    pthread_t threadId;
    pthread_create( &threadId, NULL, doing_compression, NULL );
 
    CPU_ZERO(&cpuset);
-   CPU_SET( myRank + 8, &cpuset );
+   if( myRank < 4 )
+	   CPU_SET( 4, &cpuset );
+   else
+	   CPU_SET( 8, &cpuset );
+
 
    if (pthread_setaffinity_np(threadId, sizeof(cpu_set_t), &cpuset) != 0) {
         perror("pthread_setaffinity_np");
         exit(EXIT_FAILURE);
-    }
+   }
 
 #else
    numRanks = 1;

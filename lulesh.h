@@ -39,7 +39,7 @@ extern int pair_size;
 
 // locks
 extern pthread_mutex_t creation_lock;
-extern pthread_mutex_t send_locks[8];
+extern pthread_mutex_t send_lock;
 #endif
 
 //**************************************************
@@ -257,7 +257,7 @@ class Domain {
       int rank;
       MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
-      pthread_mutex_lock( &(send_locks[rank]) );
+      pthread_mutex_lock( &send_lock );
       Release(&m_delx_zeta);
       Release(&m_delx_eta) ;
       Release(&m_delx_xi)  ;
@@ -265,7 +265,7 @@ class Domain {
       Release(&m_delv_zeta);
       Release(&m_delv_eta) ;
       Release(&m_delv_xi)  ;
-      pthread_mutex_unlock( &(send_locks[rank]) );
+      pthread_mutex_unlock( &send_lock );
    }
 
    void AllocateStrains(Int_t numElem)
@@ -280,11 +280,11 @@ class Domain {
       int rank;
       MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
-      pthread_mutex_lock( &(send_locks[rank]) );
+      pthread_mutex_lock( &send_lock );
       Release(&m_dzz) ;
       Release(&m_dyy) ;
       Release(&m_dxx) ;
-      pthread_mutex_unlock( &(send_locks[rank]) );
+      pthread_mutex_unlock( &send_lock );
    }
    
    //
