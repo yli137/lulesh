@@ -8,8 +8,9 @@
 Pair *pair;
 int pair_size = 0;
 pthread_mutex_t creation_lock;
+pthread_mutex_t free_lock;
 
-#define COMPRESS_NUM 1
+#define COMPRESS_NUM 8
 
 void signal_handler(int sig){
 }
@@ -28,6 +29,7 @@ void *doing_compression(void *)
 		for( int i = pair_size-1; i > 0 && j < COMPRESS_NUM; i--, j++ ){
 			pthread_mutex_lock( &send_lock );
 			pthread_mutex_lock( &creation_lock );
+			pthread_mutex_lock( &free_lock );
 
 			if( pair[i].isend_addr != NULL && pair[i].isend_size > 1000 ){
 				pair[i].comp_size = compress_lz4_buffer( pair[i].isend_addr, pair[i].isend_size,
@@ -35,6 +37,7 @@ void *doing_compression(void *)
 				pair[i].ready = 1;
 			}
 
+			pthread_mutex_unlock( &free_lock );
 			pthread_mutex_unlock( &creation_lock );
 			pthread_mutex_unlock( &send_lock );
 			//break;

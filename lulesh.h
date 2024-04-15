@@ -40,6 +40,7 @@ extern int pair_size;
 // locks
 extern pthread_mutex_t creation_lock;
 extern pthread_mutex_t send_lock;
+extern pthread_mutex_t free_lock;
 #endif
 
 //**************************************************
@@ -137,9 +138,22 @@ T *Allocate(size_t size)
 template <typename T>
 void Release(T **ptr)
 {
+   
    if (*ptr != NULL) {
+      pthread_mutex_lock( &free_lock );
       free(*ptr) ;
       *ptr = NULL ;
+
+      for( int i = 0; i < pair_size; i++ ){
+	      pair[i].isend_addr = NULL;
+	      
+	      if( pair[i].comp_addr != NULL ){
+		      free( pair[i].comp_addr );
+		      pair[i].comp_addr = NULL;
+	      }
+
+      }
+      pthread_mutex_unlock( &free_lock );
    }
 }
 
