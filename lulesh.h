@@ -21,6 +21,8 @@
 #include <stdint.h>
 #include <vector>
 
+#include <wrapper.h>
+
 //**************************************************
 // Allow flexibility for arithmetic representations 
 //**************************************************
@@ -117,8 +119,17 @@ template <typename T>
 void Release(T **ptr)
 {
    if (*ptr != NULL) {
+#if USE_MPI
+	   pthread_mutex_lock( &creation_lock );
+#endif
+
       free(*ptr) ;
       *ptr = NULL ;
+
+#if USE_MPI
+	   pthread_mutex_unlock( &creation_lock );
+#endif
+
    }
 }
 
