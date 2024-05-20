@@ -2780,7 +2780,6 @@ int main(int argc, char *argv[])
       TimeIncrement(*locDom) ;
       LagrangeLeapFrog(*locDom) ;
 
-      //sleep(4);
       if ((opts.showProg != 0) && (opts.quiet == 0) && (myRank == 0)) {
          std::cout << "\n\ncycle = " << locDom->cycle()       << ", "
                    << std::scientific
@@ -2788,7 +2787,6 @@ int main(int argc, char *argv[])
                    << "dt="     << double(locDom->deltatime()) << "\n";
          std::cout.unsetf(std::ios_base::floatfield);
       }
-      //sleep(4);
    }
 
    // Use reduced max elapsed time
