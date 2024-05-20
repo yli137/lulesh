@@ -1035,7 +1035,8 @@ void CalcHourglassControlForElems(Domain& domain,
 
       /* Do a check for negative volumes */
       if ( domain.v(i) <= Real_t(0.0) ) {
-#if USE_MPI         
+#if USE_MPI
+	      printf("VolumeError CalcHourglassControlForElems\n");
          MPI_Abort(MPI_COMM_WORLD, VolumeError) ;
 #else
          exit(VolumeError);
@@ -1085,7 +1086,8 @@ void CalcVolumeForceForElems(Domain& domain)
 //#pragma omp parallel for firstprivate(numElem)
       for ( Index_t k=0 ; k<numElem ; ++k ) {
          if (determ[k] <= Real_t(0.0)) {
-#if USE_MPI            
+#if USE_MPI
+		 printf("VolumeError CalcVolumeForceForElems\n");
             MPI_Abort(MPI_COMM_WORLD, VolumeError) ;
 #else
             exit(VolumeError);
@@ -1608,13 +1610,17 @@ void CalcLagrangeElements(Domain& domain)
         // See if any volumes are negative, and take appropriate action.
          if (domain.vnew(k) <= Real_t(0.0))
         {
-#if USE_MPI           
+#if USE_MPI
+	       printf("VolumeError CalcLagrangeElements\n");
            MPI_Abort(MPI_COMM_WORLD, VolumeError) ;
 #else
            exit(VolumeError);
 #endif
+
         }
       }
+
+      hint_compression_starts();
       domain.DeallocateStrains();
    }
 }
@@ -1993,7 +1999,7 @@ void CalcQForElems(Domain& domain)
   MPI_Comm_rank( MPI_COMM_WORLD, &rank );
   //if( rank == 0 )
   //printf("CalcQForElems\n");
-  hint_compression_starts();
+  //hint_compression_starts();
       CommSend(domain, MSG_MONOQ, 3, fieldData,
                domain.sizeX(), domain.sizeY(), domain.sizeZ(),
                true, true) ;
@@ -2016,7 +2022,8 @@ void CalcQForElems(Domain& domain)
       }
 
       if(idx >= 0) {
-#if USE_MPI         
+#if USE_MPI
+	      printf("QStopError CalQForElems\n");
          MPI_Abort(MPI_COMM_WORLD, QStopError) ;
 #else
          exit(QStopError);
@@ -2392,6 +2399,7 @@ void ApplyMaterialPropertiesForElems(Domain& domain)
           }
           if (vc <= 0.) {
 #if USE_MPI
+		  printf("VolumeError ApplyMaterialForElems\n");
              MPI_Abort(MPI_COMM_WORLD, VolumeError) ;
 #else
              exit(VolumeError);
@@ -2660,7 +2668,7 @@ void LagrangeLeapFrog(Domain& domain)
   MPI_Comm_rank( MPI_COMM_WORLD, &rank );
   //if( rank == 0 )
   //printf("LagrangeLeapFrog\n");
-   CommSend(domain, MSG_SYNC_POS_VEL, 6, fieldData,
+  CommSend(domain, MSG_SYNC_POS_VEL, 6, fieldData,
             domain.sizeX() + 1, domain.sizeY() + 1, domain.sizeZ() + 1,
             false, false) ;
 #endif
