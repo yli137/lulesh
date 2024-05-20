@@ -1134,11 +1134,14 @@ static inline void CalcForceForNodes(Domain& domain)
 
   int rank;
   MPI_Comm_rank( MPI_COMM_WORLD, &rank );
-  //if( rank == 0 )
-  //printf("CalForceForNodes\n");
+  if( rank == 0 )
+  printf("CalForceForNodes\n");
   CommSend(domain, MSG_COMM_SBN, 3, fieldData,
            domain.sizeX() + 1, domain.sizeY() + 1, domain.sizeZ() +  1,
            true, false) ;
+  
+  if( rank == 0 )
+	  printf("CommSBN CalForceForNodes\n");
   CommSBN(domain, 3, fieldData) ;
 #endif  
 }
@@ -1269,12 +1272,15 @@ void LagrangeNodal(Domain& domain)
 
   int rank;
   MPI_Comm_rank( MPI_COMM_WORLD, &rank );
-  //if( rank == 0 )
-  //printf("LagrangeNodal\n");
+  if( rank == 0 )
+  printf("LagrangeNodal\n");
   CommSend(domain, MSG_SYNC_POS_VEL, 6, fieldData,
             domain.sizeX() + 1, domain.sizeY() + 1, domain.sizeZ() + 1,
             false, false) ;
-   CommSyncPosVel(domain) ;
+
+ if( rank == 0 ) 
+	 printf("CommSyncPosVel LagrangeNodal\n");
+  CommSyncPosVel(domain) ;
 #endif
 #endif
    
@@ -1620,7 +1626,6 @@ void CalcLagrangeElements(Domain& domain)
         }
       }
 
-      hint_compression_starts();
       domain.DeallocateStrains();
    }
 }
@@ -1997,14 +2002,16 @@ void CalcQForElems(Domain& domain)
 
   int rank;
   MPI_Comm_rank( MPI_COMM_WORLD, &rank );
-  //if( rank == 0 )
-  //printf("CalcQForElems\n");
-  //hint_compression_starts();
+  if( rank == 0 )
+  printf("CalcQForElems\n");
       CommSend(domain, MSG_MONOQ, 3, fieldData,
                domain.sizeX(), domain.sizeY(), domain.sizeZ(),
                true, true) ;
 
+      if( rank == 0 )
+	      printf("CommMonoQ CalcQForElems\n");
       CommMonoQ(domain) ;
+
 #endif      
 
       CalcMonotonicQForElems(domain);
@@ -2649,8 +2656,6 @@ void LagrangeLeapFrog(Domain& domain)
     * material states */
    LagrangeElements(domain, domain.numElem());
 
-   //hint_compression_starts();
-
 #if USE_MPI   
 #ifdef SEDOV_SYNC_POS_VEL_LATE
    CommRecv(domain, MSG_SYNC_POS_VEL, 6,
@@ -2666,8 +2671,8 @@ void LagrangeLeapFrog(Domain& domain)
    
   int rank;
   MPI_Comm_rank( MPI_COMM_WORLD, &rank );
-  //if( rank == 0 )
-  //printf("LagrangeLeapFrog\n");
+  if( rank == 0 )
+  printf("LagrangeLeapFrog\n");
   CommSend(domain, MSG_SYNC_POS_VEL, 6, fieldData,
             domain.sizeX() + 1, domain.sizeY() + 1, domain.sizeZ() + 1,
             false, false) ;
@@ -2678,6 +2683,8 @@ void LagrangeLeapFrog(Domain& domain)
 
 #if USE_MPI   
 #ifdef SEDOV_SYNC_POS_VEL_LATE
+   if( rank == 0 )
+	   printf("CommSyncPosVel LagrangeLeapFrog\n");
    CommSyncPosVel(domain) ;
 #endif
 #endif   
@@ -2762,11 +2769,14 @@ int main(int argc, char *argv[])
    CommRecv(*locDom, MSG_COMM_SBN, 1,
             locDom->sizeX() + 1, locDom->sizeY() + 1, locDom->sizeZ() + 1,
             true, false) ;
-  //if( myRank == 0 )
-  //printf("Main\n");
+  if( myRank == 0 )
+  printf("Main\n");
    CommSend(*locDom, MSG_COMM_SBN, 1, &fieldData,
             locDom->sizeX() + 1, locDom->sizeY() + 1, locDom->sizeZ() +  1,
             true, false) ;
+   
+   if( myRank == 0 )
+	   printf("Main SBN\n");
    CommSBN(*locDom, 1, &fieldData) ;
 
    // End initialization
@@ -2784,6 +2794,9 @@ int main(int argc, char *argv[])
 //   for(Int_t i = 0; i < locDom->numReg(); i++)
 //      std::cout << "region" << i + 1<< "size" << locDom->regElemSize(i) <<std::endl;
    while((locDom->time() < locDom->stoptime()) && (locDom->cycle() < opts.its)) {
+
+	   if( myRank == 0 )
+		   printf("---Start\n");
 
       TimeIncrement(*locDom) ;
       LagrangeLeapFrog(*locDom) ;
